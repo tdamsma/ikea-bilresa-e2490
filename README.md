@@ -339,10 +339,12 @@ Four things are needed:
 - **No automatic key sequence switching.** The switch is local, returns success
   regardless, and persists across a reboot, so a target left in that state stays
   broken until the sequence is put back.
-- **A master key, advertised alone.** The ZLL master key, index 4, works. It has
-  not been shown to be *required*: the SDK default advertises both the
-  certification and master keys, and that default was never retried once the
-  sweep was found to be the real cause.
+- **A master key, advertised alone.** The ZLL master key, index 4, and it is
+  required. With the SDK default, which advertises both the certification and
+  master keys and prefers the certification key, commissioning completes and
+  then every frame is rejected with NWK status 0x12: no traffic arrives and the
+  remote keeps blinking. Tested 2026-09-11, against a run minutes later on the
+  same hardware that differed only in the key and worked.
 - **One endpoint per group**, see below.
 
 The remote must be factory reset first, and a reset remote can only bind channel
