@@ -254,8 +254,19 @@ Two fixes were closed unmerged, [#159045](https://github.com/home-assistant/core
 and [#168367](https://github.com/home-assistant/core/pull/168367) (stalled
 awaiting review). Work continues in
 [#177101](https://github.com/home-assistant/core/pull/177101), built on
-standardised HA event types. A controller talking to the device directly is not
-affected by any of this.
+standardised HA event types, which as of September 2026 is still a draft
+blocked on an architecture discussion. It would add a `GenericSwitchButton`
+entity with uncapped press counts. Until it lands, a community add-on
+([Vituhlos/ha-ikea-bilresa](https://github.com/Vituhlos/ha-ikea-bilresa))
+patches around the gap.
+
+Other ecosystems are worse, not better. Google Home does not support the
+Generic Switch device type at all, per Google's
+[supported devices list](https://developers.home.google.com/matter/supported-devices),
+so this remote cannot trigger Google automations. Apple Home handles single,
+double and long press, but natively allows one automation per press type per
+button. A controller talking to the device directly is not affected by any of
+this.
 
 ### 3.5 Sleep and event delivery (verified)
 
