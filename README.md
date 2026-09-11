@@ -320,21 +320,67 @@ The reset is not free. The remote leaves its Matter fabric, so it must be
 commissioned again from its setup code afterwards, and any controller holding a
 subscription to it stops receiving events.
 
-### Touchlink to a non IKEA target fails at the network key
+### Touchlink to a non IKEA target works
 
 Tested against an ESP32-C6 running the esp-zigbee SDK as a factory new router,
-which is the role a remote can adopt. The handshake starts, the target joins and
-the remote's group ids can be added to its endpoint, and then every frame from
-the remote is rejected with NWK status 0x12, bad key sequence number. The remote
-keeps blinking because its initiator never sees the exchange complete.
+which is the role a remote can adopt. Verified on hardware 2026-09-10 and
+2026-09-11.
 
-Key handling is the most likely cause and is not proven. The transferred network
-key is encrypted with either the certification key, index 15, which is public,
-or the master key, index 4, which is shared by certified Touchlink devices. An
-open stack advertises both and prefers the certification key. Whether installing
-a production master key completes the exchange with this remote has not been
-tested, so treat this as reaching network setup and failing during secured
-communication, rather than as impossible.
+An earlier version of this section reported that every frame was rejected with
+NWK status 0x12, bad key sequence number, and blamed key handling. That was
+wrong in an instructive way: the rejections came from the target's own
+diagnostic, which swept its local network key sequence and so moved it away from
+the one the remote uses. Removing the sweep is what made reception stable.
+
+Four things are needed:
+
+- **Router role on the target.** A coordinator cannot be adopted. A remote that
+  is off network creates its own network and pulls the target into it.
+- **No automatic key sequence switching.** The switch is local, returns success
+  regardless, and persists across a reboot, so a target left in that state stays
+  broken until the sequence is put back.
+- **A master key, advertised alone.** The ZLL master key, index 4, works. It has
+  not been shown to be *required*: the SDK default advertises both the
+  certification and master keys, and that default was never retried once the
+  sweep was found to be the real cause.
+- **One endpoint per group**, see below.
+
+The remote must be factory reset first, and a reset remote can only bind channel
+1. Channel 2 becomes selectable once channel 1 is bound, and channel 3 once
+channel 2 is.
+
+### Reading the channel needs one endpoint per group
+
+A Touchlink-bound remote groupcasts, which earlier work missed by reading only
+the network-layer destination. That is 0xfffd for a groupcast, because an APS
+groupcast travels inside a network-layer broadcast, so it does not distinguish
+one from a true broadcast. The delivery mode is in the APS frame control, bits 2
+and 3, where 3 means group.
+
+The group ID itself is not available: `esp_zb_apsde_data_ind_t` reports
+`dst_addr_mode=0x02` and `dst_short_addr=0xfffd`, the group already resolved
+away. What survives is `dst_endpoint`, because group delivery is resolved
+against the APS group table before the indication is raised. Give each group its
+own endpoint and the endpoint names the channel.
+
+Two traps. Binding a channel makes the remote send Groups Remove All Groups then
+Groups Add Group to endpoint 1, which destroys that layout. And the group table
+comes back from NVS, so a target that reboots still carries whatever an earlier
+bind left on endpoint 1 and receives a second copy of every frame for that
+channel. Re-assert the layout at startup as well as after Groups traffic.
+
+Working implementation in
+[esp32c6-zigbee-probe](https://github.com/tdamsma/esp32c6-zigbee-probe).
+
+### Identify works over Zigbee too
+
+The remote is a sleepy end device, so a unicast sent while it is idle is held
+for indirect delivery and expires with NWK status 0x06. Sent while the remote is
+awake, which in practice means answering a frame it has just transmitted,
+Identify blinks all three LEDs exactly as it does over Matter (§3.6). Verified
+2026-09-11 with the wheel turning continuously: 15 of 25 commands landed and one
+expired, against 95 expiries in a control run where the remote was never
+touched.
 
 ### Action mapping (per Zigbee2MQTT and verified capture)
 
@@ -346,6 +392,7 @@ readable state on the remote.
 |---|---|---|
 | Wheel turn | Level `0x0008` | Repeated `MoveToLevel` with absolute levels, one every ~101 ms |
 | Wheel click | On/Off `0x0006` | Alternating `On` / `Off` commands, state held per group on the remote |
+| Wheel double click | Scenes `0x0005` | Command `0x07`, one frame per double click. Verified 2026-09-11 |
 | Group button | None | Nothing reaches the coordinator |
 
 See [zigbee-details.md](zigbee-details.md) for the endpoint and cluster map,
