@@ -100,15 +100,35 @@ Any code that maps Level straight onto an output will visibly glitch on every
 single click. Either ignore a Level of 0 that is immediately followed by an
 On/Off, or debounce Level by ~150 ms.
 
-## The group button is invisible
+## The group button is invisible to a coordinator
 
 Pressing the button below the LEDs changes which group the remote drives, but
 **emits nothing to a coordinator**. A coordinator therefore sees one flat action
-stream and cannot tell the three groups apart. This is the fundamental limit of
-Zigbee mode, and the reason Matter is the better route if you want three
-independent channels. In practice this is what stops the community HA
-blueprints from driving more than one target at a time — the Matter
-integration can, this one cannot.
+stream and cannot tell the three groups apart. In practice this is what stops
+the community HA blueprints from driving more than one target at a time — the
+Matter integration can, this one cannot.
+
+This is a limit of the *coordinator* path, not of Zigbee mode as such. A device
+bound by **Touchlink** does see the channel, because the remote groupcasts to
+21658, 21659 or 21660 according to the selected channel, and group membership
+determines delivery. Verified on hardware 2026-09-10, M5NanoC6, ESP-IDF 5.4.2.
+
+Recovering the group ID is awkward, because the esp-zigbee-sdk does not expose
+it. For a groupcast, `zb_zcl_parsed_hdr_t.addr_data.common_data.dst_addr` reads
+0xfffd, since an APS groupcast travels inside a network-layer broadcast, and
+`esp_zb_apsde_data_ind_t` reports `dst_addr_mode=0x02` with
+`dst_short_addr=0xfffd`, the group having been resolved away. The APS frame
+control still marks the frame as group-delivered: bits 2–3 of `fc`, where 3
+means group.
+
+The way to get the channel back is to give each group its own endpoint, 21658
+on endpoint 1, 21659 on endpoint 2 and 21660 on endpoint 3, then read
+`dst_endpoint`. Note that binding a channel makes the remote send Groups Remove
+All Groups followed by Groups Add Group to endpoint 1, which destroys that
+layout unless it is re-asserted afterwards.
+
+Working implementation in
+[esp32c6-zigbee-probe](https://github.com/tdamsma/esp32c6-zigbee-probe).
 
 ## Battery reporting is not trustworthy
 
