@@ -20,9 +20,15 @@ about this mode traces back to that thread.
 | | |
 |---|---|
 | Zigbee model id | **`09BA`** (the E2489 dual-button sibling is **`09B9`**) |
-| Manufacturer | IKEA of Sweden |
+| Manufacturer | IKEA of Sweden, manufacturer id **4476** |
+| Hardware version | 2 (both models) |
 | Type | Battery-powered Zigbee End Device (sleepy) |
 | Firmware seen in interviews | 1.8.5, date code 20250226 — same build as shipped |
+| E2489 date code | 20250206 |
+
+Manufacturer id 4476 is the same number as the Matter vendor id 0x117C, which
+is a convenient cross-protocol confirmation that you are looking at one device
+wearing two stacks.
 
 Those model ids are what Z2M and ZHA match on, and the fastest way to tell from
 a log which BILRESA you are looking at.
@@ -76,6 +82,12 @@ maximum for lights is 254, and a **transition time of 1 second** — nonsensical
 for a live dimmer emitting a new target every 101 ms, and the likely reason
 some integrations feel sluggish. Some integrations surface that 255 as **null**
 instead. Parse leniently, clamp, and handle null.
+
+Zigbee2MQTT's device page carries the same warning: "The MoveToLevel brightness
+command lacks parameters and may exceed optimal brightness levels." Its own
+workaround for the null-at-maximum case shipped in
+[zigbee-herdsman-converters#11244](https://github.com/Koenkk/zigbee-herdsman-converters/pull/11244),
+the PR that added scroll-wheel support.
 
 Values can also arrive **out of order** on some coordinators — reported
 independently by more than one person on the Reddit thread, not reproduced in
@@ -141,16 +153,31 @@ Worse, the value itself is routinely mishandled. A published interview shows
 (0–200), so 224 raw becomes 112 when something forgets to halve it. This is the
 same encoding trap as the Matter side (see README §3.7), and it is why several
 people report an obviously wrong battery figure in ZHA. Treat any battery
-reading over 100 as a doubled value.
+reading over 100 as a doubled value. Fixed upstream in
+[zigbee-herdsman-converters#11997](https://github.com/Koenkk/zigbee-herdsman-converters/pull/11997).
 
 ## Other exposed attributes
 
-`battery`, `voltage`, `identify`, `action` — with the action enum `on`, `off`,
-`on_double`, `off_double`, `brightness_move_to_level`.
+`battery`, `voltage`, `identify`, `action`. The action enum differs between the
+two models, because the wheel and the buttons emit different Level Control
+commands:
 
-Double and triple clicks map to IKEA's scene commands
-`TradfriArrowSingle (256,13)` = next scene and `(257,13)` = previous, against
-group 65289. Only recognised by IKEA WS bulbs; other brands ignore them.
+| Model | Action enum |
+|---|---|
+| E2490 scroll wheel | `on`, `off`, `on_double`, `off_double`, `brightness_move_to_level` |
+| E2489 dual button | `on`, `off`, `on_double`, `off_double`, `brightness_move_up`, `brightness_move_down`, `brightness_stop` |
+
+Double clicks send IKEA's custom Scenes command `TradfriArrowSingle` (command
+`0x07`) with param1 `256` on the on-side or `257` on the off-side, against group
+65289 — the same command IKEA's older remotes use to step WS bulbs to the next
+or previous scene.
+
+Zigbee2MQTT decodes this directly into `on_double` and `off_double` through a
+dedicated helper, `ikeaBilresaDouble()` (`src/lib/ikea.ts:745`). The command
+definitions themselves (`tradfriArrowSingle` 0x07, `tradfriArrowHold` 0x08,
+`tradfriArrowRelease` 0x09) are in `addIkeaGenScenesCluster()` in the same file.
+A bulb that does not understand `TradfriArrowSingle` simply ignores the frame,
+which does not stop Z2M from acting on it.
 
 ## Integration support
 
@@ -160,7 +187,7 @@ Zigbee device. Support has since landed in both stacks.
 | Stack | State |
 |---|---|
 | Zigbee2MQTT | Supported. Both models handled by [zigbee-herdsman-converters#11154](https://github.com/Koenkk/zigbee-herdsman-converters/pull/11154), raised from issues [#30321](https://github.com/Koenkk/zigbee2mqtt/issues/30321) (E2490) and [#30325](https://github.com/Koenkk/zigbee2mqtt/issues/30325) (E2489). Recognised from zigbee-herdsman-converters **25.98.0** / Z2M **2.7.2**. |
-| ZHA | Supported. Quirk v2 in [zha-device-handlers#4612](https://github.com/zigpy/zha-device-handlers/pull/4612), merged **24 March 2026**, covering both `09B9` and `09BA`. |
+| ZHA | **Partial.** Quirk v2 in [zha-device-handlers#4612](https://github.com/zigpy/zha-device-handlers/pull/4612) (`zhaquirks/ikea/bilresa2btn.py`), merged **24 March 2026**, covers `09B9` (E2489) only. There is no quirk for the `09BA` scroll wheel; how its triggers should surface is tracked in [#4991](https://github.com/zigpy/zha-device-handlers/issues/4991), and the original device-support request is [#4647](https://github.com/zigpy/zha-device-handlers/issues/4647). |
 
 Before the converter landed, the auto-generated Z2M definition exposed only the
 action endpoint — battery plus basic on/off and level — with the wheel and the

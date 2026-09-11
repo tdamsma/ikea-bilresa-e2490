@@ -37,6 +37,12 @@ Both Matter and Zigbee measurements were taken with the same M5Stack NanoC6
 
 Firmware updates are available only in Matter mode.
 
+IKEA's entry in the CSA Distributed Compliance Ledger shows certified firmware
+has moved past what was measured here: **1.9.15** is now the latest certified
+build for both E2490 and E2489, against 1.8.7 and 1.8.5 tested below, and
+certification has moved from Matter 1.3 to 1.4. Behaviour on newer firmware is
+untested.
+
 ### Product groups
 
 The button below the LEDs cycles through product groups 1, 2 and 3. The number
@@ -124,6 +130,16 @@ Switch (0x003B) server clusters.
 
 Home Assistant labels these endpoints "Button 1" through "Button 9" in the
 same order. Controllers address them using the endpoint IDs in the table.
+
+This layout is corroborated by an independent Home Assistant diagnostics dump
+of another unit (firmware 1.8.7, spec 0x01030000), filed on
+[home-assistant/core#159035](https://github.com/home-assistant/core/issues/159035):
+same nine endpoints, same FeatureMap 22 on the six turn endpoints and 30 on the
+three click endpoints, same `MultiPressMax` of 18 and 3.
+
+The E2489 dual-button sibling (Matter product id 32769, 0x8001) has a different
+topology: exactly two Generic Switch endpoints, one per button. Both models are
+Matter device type 15 (0x0F, Generic Switch).
 
 ### 3.3 The root endpoint
 
@@ -225,6 +241,22 @@ A wheel turn is reported as repeated button events, and
 detents turned. A 10-click turn arrives as a multi-press of 10. Use the count for
 rotation distance and the endpoint for direction.
 
+Home Assistant cannot currently use that full range. Its Matter integration
+suppresses `MultiPressOngoing` and caps exposed events at `multi_press_1`
+through `multi_press_8`, so a fast turn past eight detents is silently truncated
+even though the device reported it correctly
+([home-assistant/core#159035](https://github.com/home-assistant/core/issues/159035),
+opened 14 December 2025). The "1 to 8 clicks" figure repeated in community
+threads describes this limitation, not the device.
+
+Two fixes were closed unmerged, [#159045](https://github.com/home-assistant/core/pull/159045)
+(the code owner required backward compatibility and the author ran out of time)
+and [#168367](https://github.com/home-assistant/core/pull/168367) (stalled
+awaiting review). Work continues in
+[#177101](https://github.com/home-assistant/core/pull/177101), built on
+standardised HA event types. A controller talking to the device directly is not
+affected by any of this.
+
 ### 3.5 Sleep and event delivery (verified)
 
 ```
@@ -276,7 +308,10 @@ active window. The LEDs respond within a fraction of a second.
   be controlled.
 - Battery level is readable through `PowerSource` on the root endpoint, but
   has no event stream. `BatPercentRemaining` uses half-percent units (0–200),
-  so a reading of 84 means 42%.
+  so a reading of 84 means 42%. That example is from a real dump, taken at a
+  `BatVoltage` of 2570 mV: healthy for two NiMH cells, reported as under half.
+  Rechargeable users should expect systematically low percentages, because the
+  scale is calibrated for 1.5 V alkalines.
 
 ### 3.8 Multiple fabrics
 
@@ -403,12 +438,19 @@ of missing events with some coordinators.
 
 ### Integration support
 
-Support for the E2490 and E2489 was added in the following versions:
+Support was added in the following versions. Note the two stacks are not at
+parity: Zigbee2MQTT handles both models, ZHA has a quirk for the dual-button
+sibling only.
 
 | Stack | Supported since |
 |---|---|
 | Zigbee2MQTT | zigbee-herdsman-converters 25.98.0 / Z2M 2.7.2, via [converters#11154](https://github.com/Koenkk/zigbee-herdsman-converters/pull/11154) |
-| ZHA | quirk v2 [zha-device-handlers#4612](https://github.com/zigpy/zha-device-handlers/pull/4612), merged 24 March 2026 |
+| ZHA | **E2489 only.** Quirk v2 [zha-device-handlers#4612](https://github.com/zigpy/zha-device-handlers/pull/4612) (`zhaquirks/ikea/bilresa2btn.py`), merged 24 March 2026. No quirk exists for the E2490 scroll wheel |
+
+How the scroll wheel's triggers should surface in ZHA without a quirk is
+tracked in [zha-device-handlers#4991](https://github.com/zigpy/zha-device-handlers/issues/4991);
+the original device-support request is
+[#4647](https://github.com/zigpy/zha-device-handlers/issues/4647).
 
 Missing button events after successful pairing, with only battery and link
 quality updates, have been reported with EFR32MG24 / EFR32MG21 coordinators
@@ -422,6 +464,9 @@ Touchlink channels 1/2/3 map to hardcoded group IDs 21658, 21659, 21660
 E2489. BILRESA remotes in radio range use the same groups, so binding cannot
 assign separate targets to each remote. Use automation to assign separate
 targets.
+
+Zigbee2MQTT states the same constraint on its device page: "All remotes directly
+control group 21658. They can't be unbound / bound to anything else."
 
 ## 5. Choosing a mode
 
@@ -444,6 +489,13 @@ Community work on this device:
   (Home Assistant forum) provides a Z2M/ZHA blueprint for brightness, volume,
   colour temperature and hue, with mode cycling on double-press. The thread
   also includes user reports.
+- [BILRESA scroll wheel blueprint (Matter)](https://community.home-assistant.io/t/ikea-bilresa-scroll-wheel-blueprint-matter-the-original/965365)
+  (Home Assistant forum) is a separate, Matter-side blueprint. It multiplies the
+  reported click count by a configurable step size. Two operational notes from
+  that thread: nine hidden sensor entities must be enabled by hand to get its
+  "instant" mode, otherwise it fires once after the gesture completes; and a
+  second BILRESA needs a unique name in Matter settings, or its entities gain
+  `_2` suffixes and the blueprint's `event.*_1` match breaks.
 - [IKEA Bilresa 2 Button Remote pairs with ZHA](https://community.home-assistant.io/t/ikea-bilresa-2-button-remote-pairs-with-zha/968513)
   (Home Assistant forum) covers the E2489 sibling.
 
@@ -460,6 +512,10 @@ Measurement tools:
 - Product photo © Inter IKEA Systems B.V., from the [BILRESA product page](https://www.ikea.com/nl/en/p/bilresa-remote-control-white-smart-scroll-wheel-70604172/)
 - Zigbee mode discovery and first-hand community reports: [r/tradfri, "BILRESA on Zigbee"](https://www.reddit.com/r/tradfri/comments/1plqavn/bilresa_on_zigbee/), 13 December 2025
 - Zigbee interview data, model ids and converter work: Zigbee2MQTT issues [#30321](https://github.com/Koenkk/zigbee2mqtt/issues/30321) and [#30325](https://github.com/Koenkk/zigbee2mqtt/issues/30325), resolved by [zigbee-herdsman-converters#11154](https://github.com/Koenkk/zigbee-herdsman-converters/pull/11154)
-- ZHA quirk v2: [zigpy/zha-device-handlers#4612](https://github.com/zigpy/zha-device-handlers/pull/4612)
+- Further converter work: [#11244](https://github.com/Koenkk/zigbee-herdsman-converters/pull/11244) (scroll-wheel support, including a workaround for brightness returning NaN at maximum), [#11403](https://github.com/Koenkk/zigbee-herdsman-converters/pull/11403) (voltage reporting) and [#11635](https://github.com/Koenkk/zigbee-herdsman-converters/pull/11635) (removing it again), [#11997](https://github.com/Koenkk/zigbee-herdsman-converters/pull/11997) (battery percentage fix)
+- Double-press decoding lives in `ikeaBilresaDouble()`, [zigbee-herdsman-converters `src/lib/ikea.ts:745`](https://github.com/Koenkk/zigbee-herdsman-converters/blob/master/src/lib/ikea.ts); the custom Scenes commands are defined in `addIkeaGenScenesCluster()` in the same file
+- ZHA quirk v2: [zigpy/zha-device-handlers#4612](https://github.com/zigpy/zha-device-handlers/pull/4612) (E2489 only)
+- Matter certification, product ids and firmware history: CSA Distributed Compliance Ledger, vendor 4476
+- Independent Matter cluster dump of a second unit: attachment on [home-assistant/core#159035](https://github.com/home-assistant/core/issues/159035)
 - Missing events on EFR32MG24/MG21 coordinators: [zigpy/bellows#708](https://github.com/zigpy/bellows/issues/708) (open, root cause unconfirmed)
 - Matter measurements were taken with an ESP32-C6 acting as its own Thread leader and Matter controller. See [esp32c6-matter-thread-controller](https://github.com/tdamsma/esp32c6-matter-thread-controller)
