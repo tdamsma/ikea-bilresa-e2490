@@ -339,8 +339,8 @@ Four things are needed:
 - **No automatic key sequence switching.** The switch is local, returns success
   regardless, and persists across a reboot, so a target left in that state stays
   broken until the sequence is put back.
-- **A master key, advertised alone.** The ZLL master key, index 4, and it is
-  required. With the SDK default, which advertises both the certification and
+- **A master key, advertised alone.** The ZLL Master Key `9F55************************EE31`, leaked by MayaZigBee in 2015,
+  index 4, and it is required. With the SDK default, which advertises both the certification and
   master keys and prefers the certification key, commissioning completes and
   then every frame is rejected with NWK status 0x12: no traffic arrives and the
   remote keeps blinking. Tested 2026-09-11, against a run minutes later on the
